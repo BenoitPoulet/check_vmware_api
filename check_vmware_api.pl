@@ -112,7 +112,7 @@ sub main {
 	$VERSION = '0.7.1';
 
 	my $np = Monitoring::Plugin->new(
-		usage => "Usage: %s -D <data_center> | -H <host_name> [ -C <cluster_name> ] [ -N <vm_name> ]\n"
+		usage => "Usage: %s -D <data_center> [ -A <real datacenter> ] | -H <host_name> [ -C <cluster_name> ] [ -N <vm_name> ]\n"
 		. "    -u <user> -p <pass> | -f <authfile>\n"
 		. "    -l <command> [ -s <subcommand> ] [ -T <timeshift> ] [ -i <interval> ]\n"
 		. "    [ -x <black_list> ] [ -o <additional_options> ]\n"
@@ -295,12 +295,13 @@ sub main {
 		. "                b - blacklist VMFS's\n"
 		. "                T (value) - timeshift to detemine if we need to refresh\n"
 		. "        * runtime - shows runtime info\n"
-		. "            + list(vm) - list of VMware machines and their statuses\n"
+		. "            + list(vm) - list of VMware machines and their statuses (can be limited to DC)\n"
 		. "            + listhost - list of VMware esx host servers and their statuses\n"
 		. "            + listcluster - list of VMware clusters and their statuses\n"
 		. "            + tools - VMware Tools status\n"
 		. "                b - blacklist VM's\n"
 		. "            + status - overall object status (gray/green/red/yellow)\n"
+		. "            + vmstats - show VMs stats (up/down/suspended) \n"
 		. "            + issues - all issues for the host\n"
 		. "                b - blacklist issues\n"
 		. "            ^ all runtime info(except cluster and tools and no thresholds)\n"
@@ -331,6 +332,7 @@ sub main {
 		. "            + list(vm) - list of VMware machines in cluster and their statuses\n"
 		. "            + listhost - list of VMware esx host servers in cluster and their statuses\n"
 		. "            + status - overall cluster status (gray/green/red/yellow)\n"
+		. "            + vmstats - show VMs stats (up/down/suspended) \n"
 		. "            + issues - all issues for the cluster\n"
 		. "                b - blacklist issues\n"
 		. "            ^ all cluster runtime info\n"
@@ -370,6 +372,13 @@ sub main {
 		spec => 'datacenter|D=s',
 		help => "-D, --datacenter=<DCname>\n"
 		. '   Datacenter hostname.',
+		required => 0,
+	);
+
+  $np->add_arg(
+		spec => 'real_datacenter|A=s',
+		help => "-A, --real_datacenter=<DCname>\n"
+		. '   Real Datacenter name, the other is in fact the VCenter hostname.',
 		required => 0,
 	);
 
@@ -501,6 +510,7 @@ sub main {
 	my $host = $np->opts->host;
 	my $cluster = $np->opts->cluster;
 	my $datacenter = $np->opts->datacenter;
+	my $real_datacenter = $np->opts->real_datacenter;
 	my $vmname = $np->opts->name;
 	my $username = $np->opts->username;
 	my $password = $np->opts->password;
@@ -781,7 +791,7 @@ sub main {
 			}
 			elsif ($command eq "RUNTIME")
 			{
-				($result, $output) = dc_runtime_info($np, local_uc($subcommand), $blacklist);
+				($result, $output) = dc_runtime_info($np, local_uc($subcommand), $blacklist, $real_datacenter);
 			}
 			else
 			{
@@ -3978,18 +3988,31 @@ sub dc_disk_io_info
 
 sub dc_runtime_info
 {
-	my ($np, $subcommand, $blacklist) = @_;
+	my ($np, $subcommand, $blacklist, $real_datacenter) = @_;
 
 	my $res = CRITICAL;
 	my $output = 'DC RUNTIME Unknown error';
 	my $runtime;
+  my $vm_views;
 
 	if (defined($subcommand))
 	{
 		if (($subcommand eq "LIST") || ($subcommand eq "LISTVM"))
 		{
+#################################################
+    if (defined($real_datacenter)) {
+      my $datacenter = $real_datacenter;
+      my $datacenter_view = Vim::find_entity_view(view_type => 'Datacenter', filter => { name => $datacenter });
+      die "Unknown Datacenter\n" if (!defined($datacenter_view));
+      $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', properties => ['name', 'runtime'], begin_entity => $datacenter_view);
+    }
+    else {
+      $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', properties => ['name', 'runtime']);
+    }
+################################################
+
 			my %vm_state_strings = ("poweredOn" => "UP", "poweredOff" => "DOWN", "suspended" => "SUSPENDED");
-			my $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', properties => ['name', 'runtime']);
+			#my $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', properties => ['name', 'runtime']);
 			die "Runtime error\n" if (!defined($vm_views));
 			die "There are no VMs.\n" if (!@$vm_views);
 			my $up = 0;
@@ -4015,6 +4038,51 @@ sub dc_runtime_info
 			$np->add_perfdata(label => "vmcount", value => $up, uom => 'units', threshold => $np->threshold);
 			$res = $np->check_threshold(check => $up) if (defined($np->threshold));
 		}
+    elsif ($subcommand eq "VMSTATS")
+    {
+      if (defined($real_datacenter)) {
+        my $datacenter = $real_datacenter;
+        my $datacenter_view = Vim::find_entity_view(view_type => 'Datacenter', filter => { name => $datacenter });
+        die "Unknown Datacenter\n" if (!defined($datacenter_view));
+        $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', properties => ['name', 'runtime'], begin_entity => $datacenter_view);
+      }
+      else {
+        $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', properties => ['name', 'runtime']);
+      }
+
+      my %vm_state_strings = ("poweredOn" => "UP", "poweredOff" => "DOWN", "suspended" => "SUSPENDED");
+			# my $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', begin_entity => $cluster_view, properties => ['name', 'runtime']);
+
+      my $up = 0;
+      my $down = 0;
+      my $suspended = 0;
+
+      if (defined($vm_views))
+      {
+        foreach my $vm (@$vm_views)
+  			{
+  				my $vm_state = $vm_state_strings{$vm->runtime->powerState->val};
+  				if ($vm_state eq "UP") {
+            $up++;
+          }
+          elsif ($vm_state eq "DOWN") {
+            $down++;
+          }
+          elsif ($vm_state eq "SUSPENDED") {
+            $suspended++;
+          }
+        }
+        $np->add_perfdata(label => "vmup", value => $up, uom => 'units', threshold => $np->threshold);
+        $np->add_perfdata(label => "vmdown", value => $down, uom => 'units', threshold => $np->threshold);
+        $np->add_perfdata(label => "vmsuspended", value => $suspended, uom => 'units', threshold => $np->threshold);
+        $output = $up . "/" . @$vm_views . " VMs up";
+      }
+      else
+      {
+        $output = "No VMs installed";
+      }
+      $res = OK;
+    }
 		elsif ($subcommand eq "LISTHOST")
 		{
 			my %host_state_strings = ("unknown" => "UNKNOWN", "poweredOn" => "UP", "poweredOff" => "DOWN", "suspended" => "SUSPENDED", "standBy" => "STANDBY", "MaintenanceMode" => "Maintenance Mode");
@@ -4604,7 +4672,7 @@ sub cluster_runtime_info
 			chop($output);
 			$res = OK;
 			$output = $up .  "/" . @$vm_views . " VMs up: " . $output;
-			$np->add_perfdata(label => "vmcount", value => $up, uom => 'units', threshold => $np->threshold);
+			$np->add_perfdata(label => "vmup", value => $up, uom => 'units', threshold => $np->threshold);
 			$res = $np->check_threshold(check => $up) if (defined($np->threshold));
 		}
 		elsif ($subcommand eq "LISTHOST")
@@ -4634,7 +4702,7 @@ sub cluster_runtime_info
 			chop($output);
 			$res = OK;
 			$output = $up .  "/" . @$host_views . " Hosts up: " . $output;
-			$np->add_perfdata(label => "vmcount", value => $up, uom => 'units', threshold => $np->threshold);
+			$np->add_perfdata(label => "hostup", value => $up, uom => 'units', threshold => $np->threshold);
 			$res = $np->check_threshold(check => $up) if (defined($np->threshold));
 			$res = UNKNOWN if ($res == OK && $unknown);
 		}
@@ -4679,6 +4747,41 @@ sub cluster_runtime_info
 			}
 			$np->add_perfdata(label => "issues", value => $issues_count);
 		}
+    elsif ($subcommand eq "VMSTATS")
+    {
+      my %vm_state_strings = ("poweredOn" => "UP", "poweredOff" => "DOWN", "suspended" => "SUSPENDED");
+			my $vm_views = Vim::find_entity_views(view_type => 'VirtualMachine', begin_entity => $cluster_view, properties => ['name', 'runtime']);
+
+      my $up = 0;
+      my $down = 0;
+      my $suspended = 0;
+
+      if (defined($vm_views))
+      {
+        foreach my $vm (@$vm_views)
+  			{
+  				my $vm_state = $vm_state_strings{$vm->runtime->powerState->val};
+  				if ($vm_state eq "UP") {
+            $up++;
+          }
+          elsif ($vm_state eq "DOWN") {
+            $down++;
+          }
+          elsif ($vm_state eq "SUSPENDED") {
+            $suspended++;
+          }
+        }
+        $np->add_perfdata(label => "vmup", value => $up, uom => 'units', threshold => $np->threshold);
+        $np->add_perfdata(label => "vmdown", value => $down, uom => 'units', threshold => $np->threshold);
+        $np->add_perfdata(label => "vmsuspended", value => $suspended, uom => 'units', threshold => $np->threshold);
+        $output = $up . "/" . @$vm_views . " VMs up";
+      }
+      else
+      {
+        $output = "No VMs installed";
+      }
+      $res = OK;
+    }
 		else
 		{
 			$res = CRITICAL;
@@ -4696,7 +4799,7 @@ sub cluster_runtime_info
 			foreach my $vm (@$vm_views) {
 				$up += $vm->get_property('runtime.powerState')->val eq "poweredOn";
 			}
-			$np->add_perfdata(label => "vmcount", value => $up, uom => 'units', threshold => $np->threshold);
+			$np->add_perfdata(label => "vmup", value => $up, uom => 'units', threshold => $np->threshold);
 			$output = $up . "/" . @$vm_views . " VMs up";
 		}
 		else
