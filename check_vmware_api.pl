@@ -109,7 +109,7 @@ Note: None of the Perl modules mentioned as \"may be too old\" are needed for ch
 
 sub main {
 	$PROGNAME = basename($0);
-	$VERSION = '0.7.1';
+	$VERSION = '0.7.2';
 
 	my $np = Monitoring::Plugin->new(
 		usage => "Usage: %s -D <data_center> [ -A <real datacenter> ] | -H <host_name> [ -C <cluster_name> ] [ -N <vm_name> ]\n"
@@ -120,7 +120,9 @@ sub main {
 		. '    [ -V ] [ -h ]',
 		version => $VERSION,
 		plugin  => $PROGNAME,
-		shortname => uc($PROGNAME),
+    # Shorten the output
+		# shortname => uc($PROGNAME),
+		shortname => "-",
 		blurb => 'VMware ESX/vSphere plugin',
 		extra   => "Supported commands(^ - blank or not specified parameter, o - options, T - timeshift value, b - blacklist) :\n"
 		. "    VM specific :\n"
