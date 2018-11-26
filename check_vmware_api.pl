@@ -1252,11 +1252,7 @@ sub datastore_volumes_info
                         	{
                                 	$store->RefreshDatastoreStorageInfo() if ($store->can("RefreshDatastoreStorageInfo") && exists($store->info->{timestamp}) && $defperfargs->{timeshift} && (time() - str2time($store->info->timestamp) > $defperfargs->{timeshift}));
                                 	$value1 = $value1 + convert_number($store->summary->freeSpace);
-					print "Value1 ".$value1."\n";
                                 	$value2 = $capacity = $value2 + convert_number($store->summary->capacity);
-					print "Value2 ".$value2."\n";
-                                	$value2 = simplify_number(convert_number($store->info->freeSpace) / $value2 * 100) if ($value2 > 0);
-					print "Value2 simp ".$value2."\n";
 
                                 	if ($usedflag)
                                 	{
@@ -1266,8 +1262,6 @@ sub datastore_volumes_info
 
                                 	$state = $np->check_threshold(check => $perc?$value2:$value1);
                                 	$res = Monitoring::Plugin::Functions::max_state($res, $state);
-                                	#$np->add_perfdata(label => $name, value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
-					print "Name :".$name."\n";
                                 	$output .= "'$name'" . ($usedflag ? "(used)" : "(free)") . "=". format_bytes($value1) . "B/" . format_bytes($capacity) . "B (" . $value2 . "%), " if (!$briefflag || $state != OK);
                         	}
                         	else
@@ -1279,8 +1273,8 @@ sub datastore_volumes_info
                         	$blacklist .= $blackregexpflag?"|^$name\$":",$name";
                 	}
         	}	
-		$np->add_perfdata(label => 'available', value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
 		$np->add_perfdata(label => 'used', value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
+		$np->add_perfdata(label => 'size', value => $value2, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
 	}
 	else
 	{
