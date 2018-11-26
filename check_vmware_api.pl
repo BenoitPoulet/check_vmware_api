@@ -1274,7 +1274,7 @@ sub datastore_volumes_info
                 	}
         	}	
 		$np->add_perfdata(label => 'used', value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
-		$np->add_perfdata(label => 'size', value => $value2, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
+		$np->add_perfdata(label => 'size', value => $value2, uom => 'B', threshold => $np->threshold);
 	}
 	else
 	{
