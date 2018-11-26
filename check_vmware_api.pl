@@ -1235,6 +1235,8 @@ sub datastore_volumes_info
 		my $state;
 		my $value1 = 0;
 		my $value2 = 0;
+		my $size = 0;
+		my $used = 0;
 		my $value2Simp;
 		my $capacity;
         	foreach my $ref_store (@{$datastore})
@@ -1272,9 +1274,12 @@ sub datastore_volumes_info
                         	last if (!$regexpflag && defined($subcommand) && ($name eq $subcommand));
                         	$blacklist .= $blackregexpflag?"|^$name\$":",$name";
                 	}
-        	}	
+        	}
 		$np->add_perfdata(label => 'used', value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
 		$np->add_perfdata(label => 'size', value => $value2, uom => 'B', threshold => $np->threshold);
+		$size = $value2 / (1024 * 1024 * 1024);
+		$used = $value1 / (1024 * 1024 * 1024); 
+                $output = "$used Go / $size Go" if ($state == OK);
 	}
 	else
 	{
@@ -1323,11 +1328,13 @@ sub datastore_volumes_info
 	}
 	################ Rym
 
-	if ($output)
+	if ($output && $sizeflag ne 1)
 	{
 		chop($output);
 		chop($output);
 		$output = "Storages : " . $output;
+	} elsif ($sizeflag eq 1) {
+		$output = $output;
 	}
 	else
 	{
