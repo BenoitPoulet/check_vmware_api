@@ -344,6 +344,7 @@ sub main {
 		. "                o brief - list only alerting volumes\n"
 		. "                o regexp - whether to treat name as regexp\n"
 		. "                o blacklistregexp - whether to treat blacklist as regexp\n"
+                . "                o size - output available and used size on all datastores of a cluster\n"
 		. "                b - blacklist VMFS's\n"
 		. "                T (value) - timeshift to detemine if we need to refresh\n"
 		. "            ^ all datastore info\n"
@@ -1197,12 +1198,23 @@ sub datastore_volumes_info
 	my $briefflag;
 	my $regexpflag;
 	my $blackregexpflag;
+	my $sizeflag;
 	$usedflag = $addopts =~ m/(^|\s|\t|,)\Qused\E($|\s|\t|,)/ if (defined($addopts));
+	#print "Used ".$usedflag."\n";
 	$briefflag = $addopts =~ m/(^|\s|\t|,)\Qbrief\E($|\s|\t|,)/ if (defined($addopts));
+	#print "Brief ".$briefflag."\n";
 	$regexpflag = $addopts =~ m/(^|\s|\t|,)\Qregexp\E($|\s|\t|,)/ if (defined($addopts));
+	#print "Regex ".$regexpflag."\n";
 	$blackregexpflag = $addopts =~ m/(^|\s|\t|,)\Qblacklistregexp\E($|\s|\t|,)/ if (defined($addopts));
+	#print "Black ".$blackregexpflag."\n";
+	$sizeflag = $addopts =~ m/(^|\s|\t|,)\Qsize\E($|\s|\t|,)/ if (defined($addopts));
+	#print "Size ".$sizeflag."\n";
 
 	die "Blacklist is supported only in generic check or regexp subcheck\n" if (defined($subcommand) && defined($blacklist) && !defined($regexpflag));
+
+	################ Rym
+	die "Size is not supported with used\n" if ($usedflag eq 1 && $sizeflag eq 1);
+	################ Rym
 
 	if (defined($regexpflag) && defined($subcommand))
 	{
@@ -1217,45 +1229,105 @@ sub datastore_volumes_info
 		}
 	}
 
-	my $state;
-	foreach my $ref_store (@{$datastore})
+        ################ Rym
+        if ($sizeflag eq 1)
 	{
-		my $store = Vim::get_view(mo_ref => $ref_store, properties => ['summary', 'info']);
-		my $name = $store->summary->name;
-		if (!defined($subcommand) || ($name eq $subcommand) || (defined($regexpflag) && $name =~ /$subcommand/))
+		my $state;
+		my $value1 = 0;
+		my $value2 = 0;
+		my $value2Simp;
+		my $capacity;
+        	foreach my $ref_store (@{$datastore})
+        	{
+                	my $store = Vim::get_view(mo_ref => $ref_store, properties => ['summary', 'info']);
+                	my $name = $store->summary->name;
+                	if (!defined($subcommand) || ($name eq $subcommand) || (defined($regexpflag) && $name =~ /$subcommand/))
+                	{
+                        	if (defined($blacklist))
+                        	{
+                                	next if ($blackregexpflag?$name =~ /$blacklist/:$blacklist =~ m/(^|\s|\t|,)\Q$name\E($|\s|\t|,)/);
+                        	}
+
+                        	if ($store->summary->accessible)
+                        	{
+                                	$store->RefreshDatastoreStorageInfo() if ($store->can("RefreshDatastoreStorageInfo") && exists($store->info->{timestamp}) && $defperfargs->{timeshift} && (time() - str2time($store->info->timestamp) > $defperfargs->{timeshift}));
+                                	$value1 = $value1 + convert_number($store->summary->freeSpace);
+					print "Value1 ".$value1."\n";
+                                	$value2 = $capacity = $value2 + convert_number($store->summary->capacity);
+					print "Value2 ".$value2."\n";
+                                	$value2 = simplify_number(convert_number($store->info->freeSpace) / $value2 * 100) if ($value2 > 0);
+					print "Value2 simp ".$value2."\n";
+
+                                	if ($usedflag)
+                                	{
+                                        	$value1 = convert_number($store->summary->capacity) - $value1;
+                                        	$value2 = 100 - $value2;
+                                	}
+
+                                	$state = $np->check_threshold(check => $perc?$value2:$value1);
+                                	$res = Monitoring::Plugin::Functions::max_state($res, $state);
+                                	#$np->add_perfdata(label => $name, value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
+					print "Name :".$name."\n";
+                                	$output .= "'$name'" . ($usedflag ? "(used)" : "(free)") . "=". format_bytes($value1) . "B/" . format_bytes($capacity) . "B (" . $value2 . "%), " if (!$briefflag || $state != OK);
+                        	}
+                        	else
+                        	{
+                                	$res = CRITICAL;
+                                	$output .= "'$name' is not accessible, ";
+                        	}
+                        	last if (!$regexpflag && defined($subcommand) && ($name eq $subcommand));
+                        	$blacklist .= $blackregexpflag?"|^$name\$":",$name";
+                	}
+        	}	
+		$np->add_perfdata(label => 'available', value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
+		$np->add_perfdata(label => 'used', value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
+	}
+	else
+	{
+        ################ Rym
+
+		my $state;
+		foreach my $ref_store (@{$datastore})
 		{
-			if (defined($blacklist))
+			my $store = Vim::get_view(mo_ref => $ref_store, properties => ['summary', 'info']);
+			my $name = $store->summary->name;
+			if (!defined($subcommand) || ($name eq $subcommand) || (defined($regexpflag) && $name =~ /$subcommand/))
 			{
-				next if ($blackregexpflag?$name =~ /$blacklist/:$blacklist =~ m/(^|\s|\t|,)\Q$name\E($|\s|\t|,)/);
-			}
-
-			if ($store->summary->accessible)
-			{
-				$store->RefreshDatastoreStorageInfo() if ($store->can("RefreshDatastoreStorageInfo") && exists($store->info->{timestamp}) && $defperfargs->{timeshift} && (time() - str2time($store->info->timestamp) > $defperfargs->{timeshift}));
-				my $value1 = convert_number($store->summary->freeSpace);
-				my $value2 = my $capacity = convert_number($store->summary->capacity);
-				$value2 = simplify_number(convert_number($store->info->freeSpace) / $value2 * 100) if ($value2 > 0);
-
-				if ($usedflag)
+				if (defined($blacklist))
 				{
-					$value1 = convert_number($store->summary->capacity) - $value1;
-					$value2 = 100 - $value2;
+					next if ($blackregexpflag?$name =~ /$blacklist/:$blacklist =~ m/(^|\s|\t|,)\Q$name\E($|\s|\t|,)/);
 				}
 
-				$state = $np->check_threshold(check => $perc?$value2:$value1);
-				$res = Monitoring::Plugin::Functions::max_state($res, $state);
-				$np->add_perfdata(label => $name, value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
-				$output .= "'$name'" . ($usedflag ? "(used)" : "(free)") . "=". format_bytes($value1) . "B/" . format_bytes($capacity) . "B (" . $value2 . "%), " if (!$briefflag || $state != OK);
+				if ($store->summary->accessible)
+				{
+					$store->RefreshDatastoreStorageInfo() if ($store->can("RefreshDatastoreStorageInfo") && exists($store->info->{timestamp}) && $defperfargs->{timeshift} && (time() - str2time($store->info->timestamp) > $defperfargs->{timeshift}));
+					my $value1 = convert_number($store->summary->freeSpace);
+					my $value2 = my $capacity = convert_number($store->summary->capacity);
+					$value2 = simplify_number(convert_number($store->info->freeSpace) / $value2 * 100) if ($value2 > 0);
+
+					if ($usedflag)
+					{
+						$value1 = convert_number($store->summary->capacity) - $value1;
+						$value2 = 100 - $value2;
+					}
+
+					$state = $np->check_threshold(check => $perc?$value2:$value1);
+					$res = Monitoring::Plugin::Functions::max_state($res, $state);
+					$np->add_perfdata(label => $name, value => $perc?$value2:$value1, uom => $perc?'%':'B', threshold => $np->threshold, min => 0, max => $capacity);
+					$output .= "'$name'" . ($usedflag ? "(used)" : "(free)") . "=". format_bytes($value1) . "B/" . format_bytes($capacity) . "B (" . $value2 . "%), " if (!$briefflag || $state != OK);
+				}
+				else
+				{
+					$res = CRITICAL;
+					$output .= "'$name' is not accessible, ";
+				}
+				last if (!$regexpflag && defined($subcommand) && ($name eq $subcommand));
+				$blacklist .= $blackregexpflag?"|^$name\$":",$name";
 			}
-			else
-			{
-				$res = CRITICAL;
-				$output .= "'$name' is not accessible, ";
-			}
-			last if (!$regexpflag && defined($subcommand) && ($name eq $subcommand));
-			$blacklist .= $blackregexpflag?"|^$name\$":",$name";
 		}
+	################ Rym
 	}
+	################ Rym
 
 	if ($output)
 	{
