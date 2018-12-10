@@ -1212,9 +1212,7 @@ sub datastore_volumes_info
 
 	die "Blacklist is supported only in generic check or regexp subcheck\n" if (defined($subcommand) && defined($blacklist) && !defined($regexpflag));
 
-	################ Rym
 	die "Size is not supported with used\n" if ($usedflag eq 1 && $sizeflag eq 1);
-	################ Rym
 
 	if (defined($regexpflag) && defined($subcommand))
 	{
@@ -1229,7 +1227,6 @@ sub datastore_volumes_info
 		}
 	}
 
-        ################ Rym
         if ($sizeflag eq 1)
 	{
 		my $state;
@@ -1283,7 +1280,6 @@ sub datastore_volumes_info
 	}
 	else
 	{
-        ################ Rym
 
 		my $state;
 		foreach my $ref_store (@{$datastore})
@@ -1324,9 +1320,7 @@ sub datastore_volumes_info
 				$blacklist .= $blackregexpflag?"|^$name\$":",$name";
 			}
 		}
-	################ Rym
 	}
-	################ Rym
 
 	if ($output && $sizeflag ne 1)
 	{
